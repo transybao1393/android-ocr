@@ -30,6 +30,12 @@ import androidx.camera.video.QualitySelector
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.PermissionChecker
 import com.example.opencvintegration.databinding.ActivityMainBinding
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.common.model.RemoteModelManager
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.TranslateRemoteModel
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -40,6 +46,10 @@ import java.util.Locale
 
 typealias LumaListener = (luma: Double) -> Unit
 
+//- OCR & OpenCV Flow
+//- Simple: Image's text detection => Translate to selected language
+//- Simple 2: Image's text detection => Text processing to clean trash words from detection => Translate to selected language
+//- Simple 3:
 
 class MainActivity : AppCompatActivity() {
     private lateinit var viewBinding: ActivityMainBinding
@@ -145,6 +155,12 @@ class MainActivity : AppCompatActivity() {
                                 // Task completed successfully
                                 // ...
                                 Log.d(TAG, "Text detection ${visionText.text}")
+                                Toast.makeText(this@MainActivity,
+                                    "Text detection ${visionText.text}",
+                                    Toast.LENGTH_LONG).show()
+
+                                Log.d(TAG, "Text translation ${translateText(visionText.text)}")
+
                             }
                             .addOnFailureListener { e ->
                                 // Task failed with an exception
@@ -160,6 +176,88 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         )
+    }
+
+    private fun textProcessing() {
+
+    }
+
+
+    //- text model translation management
+    private fun modelManagement() {
+        val modelManager = RemoteModelManager.getInstance()
+
+        // Get translation models stored on the device.
+        modelManager.getDownloadedModels(TranslateRemoteModel::class.java)
+            .addOnSuccessListener { models ->
+                // ...
+            }
+            .addOnFailureListener {
+                // Error.
+            }
+
+        // Delete the German model if it's on the device.
+        val germanModel = TranslateRemoteModel.Builder(TranslateLanguage.GERMAN).build()
+        modelManager.deleteDownloadedModel(germanModel)
+            .addOnSuccessListener {
+                // Model deleted.
+            }
+            .addOnFailureListener {
+                // Error.
+            }
+
+        // Download the French model.
+        val frenchModel = TranslateRemoteModel.Builder(TranslateLanguage.FRENCH).build()
+        val conditions = DownloadConditions.Builder()
+            .requireWifi()
+            .build()
+        modelManager.download(frenchModel, conditions)
+            .addOnSuccessListener {
+                // Model downloaded.
+            }
+            .addOnFailureListener {
+                // Error.
+            }
+    }
+
+    private fun translateText(text: String) : String {
+        // Create an English-German translator:
+        val options = TranslatorOptions.Builder()
+            .setSourceLanguage(TranslateLanguage.ENGLISH)
+            .setTargetLanguage(TranslateLanguage.JAPANESE)
+            .build()
+        val englishVietnameseTranslator = Translation.getClient(options)
+        var conditions = DownloadConditions.Builder()
+            .requireWifi()
+            .build()
+
+        var resultString = ""
+        englishVietnameseTranslator.downloadModelIfNeeded(conditions)
+            .addOnSuccessListener {
+                // Model downloaded successfully. Okay to start translating.
+                // (Set a flag, unhide the translation UI, etc.)
+                Log.d(TAG, "Language model download success")
+                englishVietnameseTranslator.translate(text)
+                    .addOnSuccessListener { translatedText ->
+                        // Translation successful.
+                        Log.d(TAG, "Translated text $translatedText")
+                        Toast.makeText(this@MainActivity,
+                            "Text translation $translatedText",
+                            Toast.LENGTH_LONG).show()
+                        resultString = translatedText
+                    }
+                    .addOnFailureListener { e ->
+                        // Error.
+                        // ...
+                        Log.d(TAG, "Translate failed ${e.message}")
+                    }
+            }
+            .addOnFailureListener { e ->
+                // Model couldn’t be downloaded or other internal error.
+                // ...
+                Log.d(TAG, "Language model download failed with error message ${e.message}")
+            }
+        return resultString
     }
 
     private fun captureVideo() {}
