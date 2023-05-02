@@ -1,6 +1,6 @@
 ### Project title
-Sample Android OCR, text translation, image OpenCV handling
-Support offline mode
+- Sample Android OCR, text translation, image OpenCV handling
+- Support offline mode
 
 ### Project author
 Tran Sy Bao - Johnathan
