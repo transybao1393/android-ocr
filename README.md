@@ -8,4 +8,5 @@ Tran Sy Bao - Johnathan
 ### Demo
 English detection
 ![English detection](./english-detection.png)
+Vietnamese detection
 ![Vietnamese detection](./vietnamese-detection.jpg)
