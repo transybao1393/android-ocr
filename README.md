@@ -1,4 +1,4 @@
-### Project title
+### Project description
 - Sample Android OCR, text translation, image OpenCV handling
 - Support offline mode
 - Offline model management

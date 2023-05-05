@@ -3,7 +3,7 @@ plugins {
     id 'org.jetbrains.kotlin.android'
     id 'kotlin-android'
     id 'kotlin-kapt'
-//    id 'com.google.devtools.ksp' version '1.8.21-1.0.11'
+    id 'com.google.devtools.ksp'
 }
 
 android {
@@ -27,11 +27,11 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_18
+        targetCompatibility JavaVersion.VERSION_18
     }
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '18'
     }
     buildFeatures {
         viewBinding true
@@ -67,10 +67,9 @@ dependencies {
     def room_version = "2.5.1"
     implementation("androidx.room:room-runtime:${room_version}")
     annotationProcessor("androidx.room:room-compiler:${room_version}")
-    // To use Kotlin annotation processing tool (kapt)
-    kapt("androidx.room:room-compiler:${room_version}")
 
     // To use Kotlin Symbol Processing (KSP)
+    ksp("androidx.room:room-compiler:${room_version}")
 //    ksp("androidx.room:room-compiler:${room_version}")
 
     // optional - Kotlin Extensions and Coroutines support for Room
@@ -80,4 +79,7 @@ dependencies {
 
     // optional - Guava support for Room, including Optional and ListenableFuture
     implementation("androidx.room:room-guava:$room_version")
+
+    //- ViewModel
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.4.0")
 }

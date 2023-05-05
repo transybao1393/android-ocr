@@ -29,8 +29,10 @@ import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.PermissionChecker
+import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.example.opencvintegration.dao.LanguageDAO
 import com.example.opencvintegration.databinding.ActivityMainBinding
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
@@ -46,6 +48,12 @@ import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
 import com.example.opencvintegration.database.AppDatabase
+import com.example.opencvintegration.entities.Language
+import com.example.opencvintegration.repository.LanguageRepository
+import com.example.opencvintegration.viewmodel.LanguageViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.job
 
 typealias LumaListener = (luma: Double) -> Unit
 
@@ -65,15 +73,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraExecutor: ExecutorService
 
     //- database instance
-    private var appDB: AppDatabase? = null
+    private lateinit var languageDAO: LanguageDAO
+    private lateinit var mLanguageViewModel: LanguageViewModel
+    // No need to cancel this scope as it'll be torn down with the process
+    private val applicationScope = CoroutineScope(SupervisorJob())
 
-    init {
-        //- database setup
-        appDB = Room.databaseBuilder(
-            applicationContext,
-            AppDatabase::class.java,
-            "language-db").build()
-    }
+    // Using by lazy so the database and the repository are only created when they're needed
+    // rather than when the application starts
+//    val database by lazy { AppDatabase.getDatabase(this, applicationScope) }
+//    val repository by lazy { LanguageRepository(database.languageDao()) }
 
     override fun onRequestPermissionsResult(
         requestCode: Int,
@@ -84,9 +92,6 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
                 startCamera()
-
-                Log.d(TAG, "database record count: ${appDB!!.languageDao().count()}")
-
             } else {
                 Toast.makeText(this,
                     "Permissions not granted by the user.",
@@ -100,6 +105,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
+
+        //- db handling
+        dbInit()
 
         // Request camera permissions
         if (allPermissionsGranted()) {
@@ -116,8 +124,32 @@ class MainActivity : AppCompatActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
+    private fun dbInit() {
+        mLanguageViewModel = ViewModelProvider(this)[LanguageViewModel::class.java]
+        val languageModel = Language(
+            lid = 1,
+            languageList = "Vietnamese, German, English"
+        )
+        Log.d(TAG, "language model $languageModel")
+        mLanguageViewModel.addLanguageList(languageModel)
+
+
+        Log.d(TAG, "Get one language model ${mLanguageViewModel.getSingleLanguage()}")
+
+        //- show all data count on LiveData
+        mLanguageViewModel.readAllData.observe(this) { allData ->
+            Log.d(TAG, "All data saved: $allData")
+        }
+
+        mLanguageViewModel.countAllData.observe(this) {dataCount ->
+            Log.d(TAG, "Database record count 2...: $dataCount")
+        }
+    }
+
     private fun takePhoto() {
         Log.d(TAG, "Taking a photo...")
+
+
         // Get a stable reference of the modifiable image capture use case
         val imageCapture = imageCapture ?: return
 
@@ -206,7 +238,10 @@ class MainActivity : AppCompatActivity() {
         //- Flow
         //- Step 1: Validate if contain existing language list
         //- Step 2: Compare same value from both list => remove same value out of list/array => download the rest of new model from new list
-        //- Step 3: Save needed model language list into MediaStore DAO
+        //- convert string to list => compare 2 list (existing database saved list, input list)
+        //- filter out new language model
+        //- parallel task: download new language model on background thread
+        //- parallel task: save input language model list to current db using Room
 
         val modelManager = RemoteModelManager.getInstance()
 
