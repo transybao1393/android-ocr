@@ -29,6 +29,8 @@ import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.PermissionChecker
+import androidx.room.Room
+import androidx.room.RoomDatabase
 import com.example.opencvintegration.databinding.ActivityMainBinding
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
@@ -43,6 +45,7 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
+import com.example.opencvintegration.database.AppDatabase
 
 typealias LumaListener = (luma: Double) -> Unit
 
@@ -61,6 +64,17 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var cameraExecutor: ExecutorService
 
+    //- database instance
+    private var appDB: AppDatabase? = null
+
+    init {
+        //- database setup
+        appDB = Room.databaseBuilder(
+            applicationContext,
+            AppDatabase::class.java,
+            "language-db").build()
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -70,6 +84,9 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
                 startCamera()
+
+                Log.d(TAG, "database record count: ${appDB!!.languageDao().count()}")
+
             } else {
                 Toast.makeText(this,
                     "Permissions not granted by the user.",
@@ -179,12 +196,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun textProcessing() {
-
+        //- TODO: NLP text/sentences processing implemented
     }
 
 
     //- text model translation management
-    private fun modelManagement() {
+    //- Expect: this function will not be used too much time
+    private fun translationModelManagement() {
+        //- Flow
+        //- Step 1: Validate if contain existing language list
+        //- Step 2: Compare same value from both list => remove same value out of list/array => download the rest of new model from new list
+        //- Step 3: Save needed model language list into MediaStore DAO
+
         val modelManager = RemoteModelManager.getInstance()
 
         // Get translation models stored on the device.
