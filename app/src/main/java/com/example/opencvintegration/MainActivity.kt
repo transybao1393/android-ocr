@@ -6,54 +6,47 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
+import android.widget.Toast
+import androidx.annotation.WorkerThread
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import android.widget.Toast
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.core.Preview
-import androidx.camera.core.CameraSelector
-import android.util.Log
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
-import androidx.camera.video.FallbackStrategy
-import androidx.camera.video.MediaStoreOutputOptions
-import androidx.camera.video.Quality
-import androidx.camera.video.QualitySelector
-import androidx.camera.video.VideoRecordEvent
-import androidx.core.content.PermissionChecker
 import androidx.lifecycle.ViewModelProvider
-import androidx.room.Room
-import androidx.room.RoomDatabase
 import com.example.opencvintegration.dao.LanguageDAO
 import com.example.opencvintegration.databinding.ActivityMainBinding
+import com.example.opencvintegration.entities.Language
+import com.example.opencvintegration.viewmodel.LanguageViewModel
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.TranslateRemoteModel
 import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
-import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
-import com.example.opencvintegration.database.AppDatabase
-import com.example.opencvintegration.entities.Language
-import com.example.opencvintegration.repository.LanguageRepository
-import com.example.opencvintegration.viewmodel.LanguageViewModel
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.job
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 typealias LumaListener = (luma: Double) -> Unit
 
@@ -78,10 +71,8 @@ class MainActivity : AppCompatActivity() {
     // No need to cancel this scope as it'll be torn down with the process
     private val applicationScope = CoroutineScope(SupervisorJob())
 
-    // Using by lazy so the database and the repository are only created when they're needed
-    // rather than when the application starts
-//    val database by lazy { AppDatabase.getDatabase(this, applicationScope) }
-//    val repository by lazy { LanguageRepository(database.languageDao()) }
+    private val modelManager by lazy { RemoteModelManager.getInstance() }
+    private var modelCount: Int = 0
 
     override fun onRequestPermissionsResult(
         requestCode: Int,
@@ -108,6 +99,10 @@ class MainActivity : AppCompatActivity() {
 
         //- db handling
         dbInit()
+        modelDownload()
+        Log.d(TAG, "model download count $modelCount")
+//        checkDownloadedModel()
+
 
         // Request camera permissions
         if (allPermissionsGranted()) {
@@ -208,7 +203,8 @@ class MainActivity : AppCompatActivity() {
                                     "Text detection ${visionText.text}",
                                     Toast.LENGTH_LONG).show()
 
-                                Log.d(TAG, "Text translation ${translateText(visionText.text)}")
+                                //- translate by model
+                                translateText(visionText.text)
 
                             }
                             .addOnFailureListener { e ->
@@ -234,7 +230,8 @@ class MainActivity : AppCompatActivity() {
 
     //- text model translation management
     //- Expect: this function will not be used too much time
-    private fun translationModelManagement() {
+    @WorkerThread
+    private suspend fun translationModelManagement() {
         //- Flow
         //- Step 1: Validate if contain existing language list
         //- Step 2: Compare same value from both list => remove same value out of list/array => download the rest of new model from new list
@@ -243,6 +240,7 @@ class MainActivity : AppCompatActivity() {
         //- parallel task: download new language model on background thread
         //- parallel task: save input language model list to current db using Room
 
+        //- function scope
         val modelManager = RemoteModelManager.getInstance()
 
         // Get translation models stored on the device.
@@ -254,16 +252,8 @@ class MainActivity : AppCompatActivity() {
                 // Error.
             }
 
-        // Delete the German model if it's on the device.
-        val germanModel = TranslateRemoteModel.Builder(TranslateLanguage.GERMAN).build()
-        modelManager.deleteDownloadedModel(germanModel)
-            .addOnSuccessListener {
-                // Model deleted.
-            }
-            .addOnFailureListener {
-                // Error.
-            }
-
+        //- build model base on
+        //- download 4 default translation model
         // Download the French model.
         val frenchModel = TranslateRemoteModel.Builder(TranslateLanguage.FRENCH).build()
         val conditions = DownloadConditions.Builder()
@@ -278,44 +268,174 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    private fun translateText(text: String) : String {
-        // Create an English-German translator:
-        val options = TranslatorOptions.Builder()
-            .setSourceLanguage(TranslateLanguage.ENGLISH)
-            .setTargetLanguage(TranslateLanguage.JAPANESE)
-            .build()
-        val englishVietnameseTranslator = Translation.getClient(options)
-        var conditions = DownloadConditions.Builder()
+    private fun checkDownloadedModel() {
+        GlobalScope.launch (Dispatchers.Main) {
+            withContext(Dispatchers.IO) {
+                //- view downloaded models
+                modelManager.getDownloadedModels(TranslateRemoteModel::class.java)
+                    .addOnSuccessListener { models ->
+                        // ...
+                        Log.d(TAG, "model size ${models.size}, ${models.count()}")
+                        //- check if model download
+                        val languageModelList = models.toList()
+                        for (item in languageModelList) {
+                            Log.d(
+                                TAG,
+                                "item language... ${item.language}, model name... ${item.modelName}, modelNameForBackend... ${item.modelNameForBackend}"
+                            )
+                        }
+                    }
+                    .addOnFailureListener {
+                        // Error.
+                        Log.d(TAG, "Cannot fetch any translation models ${it.message}")
+                    }
+            }
+        }
+
+    }
+
+    private fun modelDownload() {
+        GlobalScope.launch (Dispatchers.Main) {
+            //- parallel downloading
+            val germanModel = async (Dispatchers.IO) {
+                germanModelDownload()
+                modelCount++
+            }
+            val frenchModel = async (Dispatchers.IO) {
+                frenchModelDownload()
+                modelCount++
+            }
+            val vietnameseModel = async (Dispatchers.IO) {
+                vietnameseModelDownload()
+                modelCount++
+            }
+            val japaneseModel = async (Dispatchers.IO) {
+                japaneseModelDownload()
+                modelCount++
+            }
+            val chineseModel = async (Dispatchers.IO) {
+                chineseModelDownload()
+                modelCount++
+            }
+            germanModel.await()
+            frenchModel.await()
+            vietnameseModel.await()
+            japaneseModel.await()
+            chineseModel.await()
+        }
+    }
+
+    @WorkerThread
+    private fun germanModelDownload() {
+        Log.d(TAG, "on GERMAN model download")
+        val conditions = DownloadConditions.Builder()
             .requireWifi()
             .build()
+        val frenchModel = TranslateRemoteModel
+            .Builder(TranslateLanguage.GERMAN)
+            .build()
+        modelManager.download(frenchModel, conditions)
+            .addOnFailureListener{
+                Log.d(TAG, "Error when download GERMAN model ${it.message}")
+            }
+    }
 
-        var resultString = ""
-        englishVietnameseTranslator.downloadModelIfNeeded(conditions)
-            .addOnSuccessListener {
-                // Model downloaded successfully. Okay to start translating.
-                // (Set a flag, unhide the translation UI, etc.)
-                Log.d(TAG, "Language model download success")
-                englishVietnameseTranslator.translate(text)
-                    .addOnSuccessListener { translatedText ->
-                        // Translation successful.
-                        Log.d(TAG, "Translated text $translatedText")
-                        Toast.makeText(this@MainActivity,
-                            "Text translation $translatedText",
-                            Toast.LENGTH_LONG).show()
-                        resultString = translatedText
-                    }
-                    .addOnFailureListener { e ->
-                        // Error.
-                        // ...
-                        Log.d(TAG, "Translate failed ${e.message}")
-                    }
+    @WorkerThread
+    private fun japaneseModelDownload() {
+        Log.d(TAG, "on JAPANESE model download")
+        val conditions = DownloadConditions.Builder()
+            .requireWifi()
+            .build()
+        val frenchModel = TranslateRemoteModel
+            .Builder(TranslateLanguage.JAPANESE)
+            .build()
+        modelManager.download(frenchModel, conditions)
+            .addOnFailureListener{
+                Log.d(TAG, "Error when download GERMAN model ${it.message}")
+            }
+    }
+
+    @WorkerThread
+    private fun chineseModelDownload() {
+        Log.d(TAG, "on CHINESE model download")
+        val conditions = DownloadConditions.Builder()
+            .requireWifi()
+            .build()
+        val frenchModel = TranslateRemoteModel
+            .Builder(TranslateLanguage.CHINESE)
+            .build()
+        modelManager.download(frenchModel, conditions)
+            .addOnFailureListener{
+                Log.d(TAG, "Error when download GERMAN model ${it.message}")
+            }
+    }
+
+    @WorkerThread
+    private fun frenchModelDownload() {
+        Log.d(TAG, "on FRENCH model download")
+        val conditions = DownloadConditions.Builder()
+            .requireWifi()
+            .build()
+        val frenchModel = TranslateRemoteModel
+            .Builder(TranslateLanguage.FRENCH)
+            .build()
+        modelManager.download(frenchModel, conditions)
+            .addOnFailureListener{
+                Log.d(TAG, "Error when download FRENCH model ${it.message}")
+            }
+    }
+
+    @WorkerThread
+    private fun vietnameseModelDownload() {
+        Log.d(TAG, "on Vietnamese model download")
+        val conditions = DownloadConditions.Builder()
+            .requireWifi()
+            .build()
+        val frenchModel = TranslateRemoteModel
+            .Builder(TranslateLanguage.VIETNAMESE)
+            .build()
+        modelManager.download(frenchModel, conditions)
+            .addOnFailureListener{
+                Log.d(TAG, "Error when download VIETNAMESE model ${it.message}")
+            }
+    }
+
+    private fun translateText(text: String) {
+        //- declare some translation options
+        val options = TranslatorOptions.Builder()
+            .setSourceLanguage(TranslateLanguage.VIETNAMESE)
+            .setTargetLanguage(TranslateLanguage.HINDI)
+            .build()
+        val translator = Translation.getClient(options)
+
+        //- prepare for translation model download if needed
+        // Create an English-German translator:
+//        var conditions = DownloadConditions.Builder()
+//            .requireWifi()
+//            .build()
+//        translator.downloadModelIfNeeded(conditions)
+//            .addOnSuccessListener {
+//                Log.d(TAG, "Language model download success")
+//            }
+//            .addOnFailureListener { e ->
+//                Log.d(TAG, "Language model download failed with error message ${e.message}")
+//            }
+
+        //- translate
+        translateExecution(translator, text)
+    }
+
+    private fun translateExecution(translator: Translator, text: String) {
+        translator.translate(text)
+            .addOnSuccessListener { translatedText ->
+                Log.d(TAG, "Translated text $translatedText")
+                Toast.makeText(this@MainActivity,
+                    "Text translation $translatedText",
+                    Toast.LENGTH_LONG).show()
             }
             .addOnFailureListener { e ->
-                // Model couldn’t be downloaded or other internal error.
-                // ...
-                Log.d(TAG, "Language model download failed with error message ${e.message}")
+                Log.d(TAG, "Translate failed ${e.message}")
             }
-        return resultString
     }
 
     private fun captureVideo() {}
