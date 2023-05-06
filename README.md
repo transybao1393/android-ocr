@@ -6,6 +6,11 @@
 - [OpenCV] Edge detection in realtime
 - [OpenCV] Warp Perspective
 
+### Some problems need to be resolved
+- App size cache too big (~400MB)
+- File structure is not good enough
+- Still very simple approach on MLKit and Computer Vision
+
 ### Project author
 Tran Sy Bao - Johnathan
 

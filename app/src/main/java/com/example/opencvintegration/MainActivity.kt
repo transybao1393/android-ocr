@@ -34,6 +34,9 @@ import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,7 +57,6 @@ typealias LumaListener = (luma: Double) -> Unit
 //- Simple: Image's text detection => Translate to selected language
 //- Simple 2: Image's text detection => Text processing to clean trash words from detection => Translate to selected language
 //- Simple 3:
-
 class MainActivity : AppCompatActivity() {
     private lateinit var viewBinding: ActivityMainBinding
 
@@ -73,6 +75,13 @@ class MainActivity : AppCompatActivity() {
 
     private val modelManager by lazy { RemoteModelManager.getInstance() }
     private var modelCount: Int = 0
+    private var supportedLanguage = listOf(
+        TranslateLanguage.VIETNAMESE,
+        TranslateLanguage.ENGLISH,
+        TranslateLanguage.CHINESE,
+        TranslateLanguage.JAPANESE,
+    )
+
 
     override fun onRequestPermissionsResult(
         requestCode: Int,
@@ -187,14 +196,28 @@ class MainActivity : AppCompatActivity() {
                     Log.d(TAG, msg)
 
                     // MLKit image processing
-                    // When using Latin script library
-                    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                    //- validate source language
+                    var recognizer: TextRecognizer
+                    val selectedSourceLanguage = TranslateLanguage.JAPANESE
+                    val selectedTargetLanguage = TranslateLanguage.VIETNAMESE
+                    if (!supportedLanguage.contains(selectedSourceLanguage)) {
+                        Log.d(TAG, "Unsupported language when build recognizer")
+                        return
+                    }
+
+                    //- set recognizer
+                    recognizer = when (selectedSourceLanguage) {
+                        TranslateLanguage.JAPANESE -> TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+                        TranslateLanguage.CHINESE -> TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+                        else -> TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) //- for Latin characters script library (Aa-Zz)
+                    }
+
                     val image: InputImage
                     try {
                         image = InputImage.fromFilePath(this@MainActivity, output.savedUri!!)
                         Log.d(TAG, "input image $image")
                         // OCR
-                        val result = recognizer.process(image)
+                        recognizer.process(image)
                             .addOnSuccessListener { visionText ->
                                 // Task completed successfully
                                 // ...
@@ -204,7 +227,11 @@ class MainActivity : AppCompatActivity() {
                                     Toast.LENGTH_LONG).show()
 
                                 //- translate by model
-                                translateText(visionText.text)
+                                translateText(
+                                    text = visionText.text,
+                                    sourceLanguage = selectedSourceLanguage,
+                                    targetLanguage = selectedTargetLanguage
+                                )
 
                             }
                             .addOnFailureListener { e ->
@@ -297,14 +324,14 @@ class MainActivity : AppCompatActivity() {
     private fun modelDownload() {
         GlobalScope.launch (Dispatchers.Main) {
             //- parallel downloading
-            val germanModel = async (Dispatchers.IO) {
-                germanModelDownload()
-                modelCount++
-            }
-            val frenchModel = async (Dispatchers.IO) {
-                frenchModelDownload()
-                modelCount++
-            }
+//            val germanModel = async (Dispatchers.IO) {
+//                germanModelDownload()
+//                modelCount++
+//            }
+//            val frenchModel = async (Dispatchers.IO) {
+//                frenchModelDownload()
+//                modelCount++
+//            }
             val vietnameseModel = async (Dispatchers.IO) {
                 vietnameseModelDownload()
                 modelCount++
@@ -317,8 +344,8 @@ class MainActivity : AppCompatActivity() {
                 chineseModelDownload()
                 modelCount++
             }
-            germanModel.await()
-            frenchModel.await()
+//            germanModel.await()
+//            frenchModel.await()
             vietnameseModel.await()
             japaneseModel.await()
             chineseModel.await()
@@ -400,11 +427,18 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    private fun translateText(text: String) {
+    private fun translateText(text: String, sourceLanguage: String = TranslateLanguage.ENGLISH, targetLanguage: String = TranslateLanguage.VIETNAMESE) {
+        //- check if it is in supported language
+        if (!supportedLanguage.contains(sourceLanguage) || !supportedLanguage.contains(targetLanguage)) {
+            Log.d(TAG, "Unsupported language when translation client build")
+            return
+        }
+
+        //- else
         //- declare some translation options
         val options = TranslatorOptions.Builder()
-            .setSourceLanguage(TranslateLanguage.VIETNAMESE)
-            .setTargetLanguage(TranslateLanguage.HINDI)
+            .setSourceLanguage(sourceLanguage)
+            .setTargetLanguage(targetLanguage)
             .build()
         val translator = Translation.getClient(options)
 
@@ -435,6 +469,9 @@ class MainActivity : AppCompatActivity() {
             }
             .addOnFailureListener { e ->
                 Log.d(TAG, "Translate failed ${e.message}")
+                Toast.makeText(this@MainActivity,
+                    "Translate failed ${e.message}",
+                    Toast.LENGTH_LONG).show()
             }
     }
 
