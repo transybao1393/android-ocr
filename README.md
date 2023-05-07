@@ -31,5 +31,6 @@ Support fixed model download on background, if not => throwing error
 ![Model download error](./resources/ocr-model-download-error.png)
 Model download after app installed
 ![Model download in background](./resources/model_download.jpeg)
+
 OpenCV + Android processing
 [![Watch the video](https://noaccesstothissite.files.wordpress.com/2018/05/load_save_image_result_1.jpg)](./resources/opencv-processing.mp4)
