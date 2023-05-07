@@ -24,10 +24,12 @@ Tran Sy Bao - Johnathan
 
 ### Demo
 English detection
-![English detection](./english-detection.png)
+![English detection](./resources/english-detection.png)
 Vietnamese detection
-![Vietnamese detection](./vietnamese-detection.jpg)
+![Vietnamese detection](./resources/vietnamese-detection.jpg)
 Support fixed model download on background, if not => throwing error
-![Model download error](./ocr-model-download-error.png)
+![Model download error](./resources/ocr-model-download-error.png)
 Model download after app installed
-![Model download in background](./model_download.jpeg)
+![Model download in background](./resources/model_download.jpeg)
+OpenCV + Android processing
+[![Watch the video](https://noaccesstothissite.files.wordpress.com/2018/05/load_save_image_result_1.jpg)](./resources/opencv-processing.mp4)

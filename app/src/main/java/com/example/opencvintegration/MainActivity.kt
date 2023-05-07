@@ -3,6 +3,16 @@ package com.example.opencvintegration
 import android.Manifest
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.ImageFormat
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.YuvImage
+import android.media.Image
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -11,8 +21,11 @@ import android.widget.Toast
 import androidx.annotation.WorkerThread
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageInfo
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.Recorder
@@ -46,13 +59,22 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opencv.android.OpenCVLoader
+import org.opencv.android.Utils
+import org.opencv.core.Mat
+import org.opencv.core.Size
+import org.opencv.imgproc.Imgproc
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
+
 typealias LumaListener = (luma: Double) -> Unit
+typealias ImageInfoListener = (imageInfo: ImageInfo) -> Unit
+typealias BitmapListener = (bitmap: Bitmap) -> Unit
 
 //- OCR & OpenCV Flow
 //- Simple: Image's text detection => Translate to selected language
@@ -162,7 +184,6 @@ class MainActivity : AppCompatActivity() {
         // Get a stable reference of the modifiable image capture use case
         val imageCapture = imageCapture ?: return
 
-
         // Create time stamped name and MediaStore entry.
         val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US)
             .format(System.currentTimeMillis())
@@ -221,6 +242,7 @@ class MainActivity : AppCompatActivity() {
                     try {
                         image = InputImage.fromFilePath(this@MainActivity, output.savedUri!!)
                         Log.d(TAG, "input image $image")
+
                         // OCR
                         recognizer.process(image)
                             .addOnSuccessListener { visionText ->
@@ -497,7 +519,24 @@ class MainActivity : AppCompatActivity() {
                     it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
                 }
 
+            //- image capture use case
             imageCapture = ImageCapture.Builder().build()
+
+            //- image analysis use case
+            val imageAnalysis:ImageAnalysis = ImageAnalysis.Builder().build()
+                .also {
+//                    it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
+//                        Log.d(TAG, "Average luminosity: $luma")
+//                    })
+
+                    it.setAnalyzer(cameraExecutor, SimpleAnalyzer { bitmap ->
+                        Log.d(TAG, "startCamera: bitmap return")
+                        runOnUiThread(Runnable {
+                            viewBinding.grayView.setImageBitmap(bitmap)
+                        })
+//                        viewBinding.grayView.setImageBitmap(bitmap)
+                    })
+                }
 
             // Select back camera as a default
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
@@ -508,14 +547,127 @@ class MainActivity : AppCompatActivity() {
 
                 // Bind use cases to camera
                 cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, imageCapture)
-
+                    this,
+                    cameraSelector,
+                    preview,
+                    imageCapture,
+                    imageAnalysis
+                )
             } catch(exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
 
         }, ContextCompat.getMainExecutor(this))
     }
+
+    //- Image Analysis inner class
+    private class LuminosityAnalyzer(private val listener: LumaListener) : ImageAnalysis.Analyzer {
+
+        private fun ByteBuffer.toByteArray(): ByteArray {
+            rewind()    // Rewind the buffer to zero
+            val data = ByteArray(remaining())
+            get(data)   // Copy the buffer into a byte array
+            return data // Return the byte array
+        }
+
+        override fun analyze(image: ImageProxy) {
+
+            val buffer = image.planes[0].buffer
+            val data = buffer.toByteArray()
+            val pixels = data.map { it.toInt() and 0xFF }
+            val luma = pixels.average()
+
+            listener(luma)
+
+            image.close()
+        }
+    }
+
+    private class SimpleAnalyzer(private val listener: BitmapListener): ImageAnalysis.Analyzer {
+
+        fun Image.toBitmap(): Bitmap {
+            val yBuffer = planes[0].buffer // Y
+            val vuBuffer = planes[2].buffer // VU
+
+            val ySize = yBuffer.remaining()
+            val vuSize = vuBuffer.remaining()
+
+            val nv21 = ByteArray(ySize + vuSize)
+
+            yBuffer.get(nv21, 0, ySize)
+            vuBuffer.get(nv21, ySize, vuSize)
+
+            val yuvImage = YuvImage(nv21, ImageFormat.NV21, this.width, this.height, null)
+            val out = ByteArrayOutputStream()
+            yuvImage.compressToJpeg(Rect(0, 0, yuvImage.width, yuvImage.height), 50, out)
+            val imageBytes = out.toByteArray()
+            return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+        }
+
+        private fun effect(input: Bitmap): Bitmap? {
+            val output = Bitmap.createBitmap(
+                input.width,
+                input.height,
+                Bitmap.Config.ARGB_8888
+            )
+            val source = Mat()
+            Utils.bitmapToMat(input, source)
+            Imgproc.cvtColor(source, source, Imgproc.COLOR_BGR2GRAY)
+            Imgproc.GaussianBlur(source, source, Size(3.0, 3.0), 0.0)
+            Imgproc.adaptiveThreshold(
+                source,
+                source,
+                255.0,
+                Imgproc.ADAPTIVE_THRESH_MEAN_C,
+                Imgproc.THRESH_BINARY_INV,
+                5,
+                4.0
+            )
+            Utils.matToBitmap(source, output)
+            return output
+        }
+
+        @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
+        override fun analyze(imageProxy: ImageProxy) {
+
+//            val imageInfo = imageProxy.imageInfo
+//            val image: Image? = imageProxy.image
+//            val currentImageBitmap: Bitmap = toBitmap(image)
+//            val openCVEffect: Bitmap = effect(currentImageBitmap) ?: return
+            
+
+            imageProxy.image?.let {
+                val imageBitmap = it.toBitmap()
+                Log.d(TAG, "analyze: current image bitmap $imageBitmap")
+                val openCVEffect: Bitmap = effect(imageBitmap) ?: return
+                listener(openCVEffect)
+            }
+
+//            runOnUiThread(Runnable {
+//                val currentImageBitmap: Bitmap = viewBinding.viewFinder.bitmap!!
+//                Log.d(TAG, "on image analyze...")
+//                viewBinding.grayView.setImageBitmap(toGrayscale(currentImageBitmap))
+//            })
+
+            imageProxy.close()
+        }
+    }
+
+
+    private fun toGrayscale(bmpOriginal: Bitmap): Bitmap {
+        val height: Int = bmpOriginal.height
+        val width: Int = bmpOriginal.width
+        val bmpGrayscale = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmpGrayscale)
+        val paint = Paint()
+        val cm = ColorMatrix()
+        cm.setSaturation(0f)
+        val f = ColorMatrixColorFilter(cm)
+        paint.colorFilter = f
+        c.drawBitmap(bmpOriginal, 0f, 0f, paint)
+        return bmpGrayscale
+    }
+
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(
