@@ -85,4 +85,7 @@ dependencies {
 
     //- ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.4.0")
+
+    //- opencv
+    implementation("com.quickbirdstudios:opencv:4.5.0")
 }

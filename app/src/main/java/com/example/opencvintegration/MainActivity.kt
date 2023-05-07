@@ -45,6 +45,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.opencv.android.OpenCVLoader
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -111,6 +112,10 @@ class MainActivity : AppCompatActivity() {
         modelDownload()
         Log.d(TAG, "model download count $modelCount")
 //        checkDownloadedModel()
+
+        //- opencv check
+        if (OpenCVLoader.initDebug()) Toast.makeText(this, "OpenCV load successfully", Toast.LENGTH_SHORT).show()
+        else Toast.makeText(this, "OpenCV load failed", Toast.LENGTH_SHORT).show()
 
 
         // Request camera permissions
